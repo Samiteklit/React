@@ -1,0 +1,20 @@
+[build]
+  base = "."
+  command = "npm run build"
+  publish = "react-app/dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8889
+  autoLaunch = false
+  framework = "#custom"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
