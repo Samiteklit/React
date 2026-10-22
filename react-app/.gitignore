@@ -13,7 +13,7 @@ dist-ssr
 *.local
 .env*
 !.env.example
-data/
+/data/
 
 # Editor directories and files
 .vscode/*
@@ -25,3 +25,6 @@ data/
 *.njsproj
 *.sln
 *.sw?
+
+# Local Netlify folder
+.netlify

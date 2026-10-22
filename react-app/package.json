@@ -4,15 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node server/index.js",
-    "start": "node server/index.js --production",
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "start": "netlify dev --port 8889",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "migrate:supabase": "node scripts/migrate-supabase.js",
-    "preview": "node server/index.js --production"
+    "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.118.0",
+    "@netlify/identity": "^2.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

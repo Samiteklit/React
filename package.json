@@ -1,0 +1,27 @@
+{
+  "name": "kora-perfume",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "react-app"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace react-app",
+    "build": "npm run check && npm run build --workspace react-app",
+    "lint": "npm run lint --workspace react-app",
+    "check": "tsc --noEmit -p react-app/tsconfig.app.json && tsc --noEmit -p react-app/tsconfig.node.json && tsc --noEmit -p tsconfig.server.json",
+    "start": "netlify dev --port 8889"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.6",
+    "@netlify/database": "^2.0.1",
+    "@netlify/functions": "^6.0.3",
+    "@netlify/identity": "^2.0.0",
+    "drizzle-orm": "1.0.0-beta.22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "drizzle-kit": "1.0.0-beta.22",
+    "typescript": "~6.0.2"
+  }
+}

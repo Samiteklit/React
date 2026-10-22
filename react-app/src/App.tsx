@@ -4,117 +4,18 @@ import Admin from './Admin'
 import { formatPrice } from './lib/currency'
 import { getProducts } from './lib/products'
 
-type Family = 'Floral' | 'Woody' | 'Fresh' | 'Amber'
-type BottleShape = 'square' | 'round' | 'slim'
-
-type Fragrance = {
-  id: string
-  name: string
-  family: Family
-  notes: string
-  price: number
-  size: string
-  tag?: string
-  glass: string
-  liquid: string
-  cap: string
-  backdrop: string
-  shape: BottleShape
-  imageUrl?: string | null
-  soldOut?: boolean
-}
-
-const fragrances: Fragrance[] = [
-  {
-    id: 'velvet-bloom',
-    name: 'Velvet Bloom',
-    family: 'Floral',
-    notes: 'Rose · pink pepper · musk',
-    price: 86,
-    size: '50 ml',
-    tag: 'Bestseller',
-    glass: '#e8cfd2',
-    liquid: '#b97880',
-    cap: '#6B1F3A',
-    backdrop: '#EDE3D7',
-    shape: 'square',
-  },
-  {
-    id: 'cedar-veil',
-    name: 'Cedar Veil',
-    family: 'Woody',
-    notes: 'Cedarwood · fig · sandalwood',
-    price: 92,
-    size: '50 ml',
-    tag: 'New',
-    glass: '#e2d6c9',
-    liquid: '#a88f72',
-    cap: '#B08D57',
-    backdrop: '#E5D9CC',
-    shape: 'slim',
-  },
-  {
-    id: 'citrus-hour',
-    name: 'Citrus Hour',
-    family: 'Fresh',
-    notes: 'Bergamot · neroli · green tea',
-    price: 78,
-    size: '50 ml',
-    glass: '#f1e8d4',
-    liquid: '#c3a66e',
-    cap: '#A88A5A',
-    backdrop: '#F3EBDD',
-    shape: 'round',
-  },
-  {
-    id: 'amber-muse',
-    name: 'Amber Muse',
-    family: 'Amber',
-    notes: 'Vanilla · amber · tonka bean',
-    price: 98,
-    size: '50 ml',
-    glass: '#e8d5c4',
-    liquid: '#b08d57',
-    cap: '#6B1F3A',
-    backdrop: '#EDE3D7',
-    shape: 'square',
-  },
-  {
-    id: 'soft-focus',
-    name: 'Soft Focus',
-    family: 'Floral',
-    notes: 'Peony · pear · white musk',
-    price: 82,
-    size: '50 ml',
-    glass: '#eadbd5',
-    liquid: '#c89a92',
-    cap: '#8B7968',
-    backdrop: '#F2E6E3',
-    shape: 'round',
-  },
-  {
-    id: 'after-rain',
-    name: 'After the Rain',
-    family: 'Fresh',
-    notes: 'Moss · mint · clean musk',
-    price: 80,
-    size: '50 ml',
-    glass: '#e0d8d0',
-    liquid: '#9d8774',
-    cap: '#3D1125',
-    backdrop: '#E7E2DC',
-    shape: 'slim',
-  },
-]
+import type { Fragrance } from './types'
+import { starterFragrances as fragrances } from './data/fragrances'
 
 const families = ['All scents', 'Floral', 'Woody', 'Fresh', 'Amber'] as const
 
 function FragranceArt({ product, hero = false }: { product: Fragrance; hero?: boolean }) {
+  const rawId = useId().replaceAll(':', '')
+
   if (product.imageUrl) {
     return <img className={hero ? 'fragrance-art fragrance-art--hero' : 'fragrance-art'} src={product.imageUrl} alt={`${product.name} perfume`} />
   }
 
-  const rawId = useId().replaceAll(':', '')
   const glassId = `glass-${rawId}`
   const shineId = `shine-${rawId}`
   const clipId = `clip-${rawId}`
@@ -463,7 +364,7 @@ function Storefront() {
 }
 
 function App() {
-  return window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/')
+  return /(?:invite|recovery|confirmation|access)_token=/.test(window.location.hash) || window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/')
     ? <Admin />
     : <Storefront />
 }

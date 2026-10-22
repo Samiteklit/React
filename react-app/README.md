@@ -1,39 +1,21 @@
 # KORA Fragrance House
 
-KORA is a React + Vite perfume shop with a product admin. It can run locally on SQLite or use Supabase for its product catalog and photos.
+KORA is a React and Vite perfume shop with a hosted product studio. Netlify Functions serves the catalog API, Netlify Database stores products, Netlify Blobs stores photos, and Netlify Identity protects administrator access.
 
-## Run the shop
+## Run locally
 
-```bash
-pnpm install
-pnpm dev
-```
+From the repository root, run `npm ci`, then `netlify dev --port 8889`, then open http://localhost:8889. Use Netlify Dev rather than Vite alone so API routes and authentication are available.
 
-Open the local address shown in the terminal. Visit `/admin` to manage fragrances.
+## Deploy
 
-## Supabase setup
+The root `netlify.toml` configures the application directory, build command, publish directory, functions, and application routes. Netlify applies the migrations in `netlify/database/migrations` during deployment. The initial migration seeds six starter fragrances once; redeploying does not overwrite edits or restore deleted products. The storefront falls back to starter scents if the online catalog is temporarily unavailable.
 
-The Supabase project URL and publishable key belong in the ignored `.env.local` file as `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. The publishable key is meant for browser use; never put a Supabase `service_role` or secret key in frontend code.
+## Administrator setup
 
-1. Run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL Editor. It creates the catalog, admin allowlist, RLS policies, and public product-image bucket. Running it again is safe.
-2. In Supabase Auth, create an administrator user. Disable public sign-ups if only dashboard-created accounts should exist.
-3. Add that user's email to the allowlist by running this in the SQL Editor, replacing the email:
+In the Netlify dashboard for this project, open Identity and invite the administrator's email address. After the invitation is accepted, open that user and add the `admin` role. Use `/admin` to sign in, manage fragrances, upload photos, hide products, or mark them sold out. Accounts without the admin role cannot read hidden products or change the catalog. Public registration never grants admin access.
 
-   ```sql
-   INSERT INTO public.admin_users (user_id)
-   SELECT id FROM auth.users WHERE lower(email) = lower('admin@example.com')
-   ON CONFLICT (user_id) DO NOTHING;
-   ```
+Invitation and password recovery links work when they return to either the homepage or `/admin`. The studio includes a password recovery link. Existing local SQLite or Supabase passwords are not used by the hosted application. Existing external catalog data is not imported automatically; the hosted database starts with the six starter fragrances.
 
-4. The storefront reads active products publicly. The admin uses Supabase Auth; only users in `admin_users` may see hidden products, edit the catalog, or upload/delete photos.
-5. To migrate the local SQLite catalog, temporarily add `KORA_MIGRATION_EMAIL` and `KORA_MIGRATION_PASSWORD` to `.env.local` for the allowlisted administrator, then run `pnpm migrate:supabase`. The migration is safe to rerun and leaves SQLite untouched. Remove these migration credentials from `.env.local` afterward.
-6. Restart the app after changing `.env.local` so Vite reloads its public environment variables.
+## Development checks
 
-The local admin-password hash is not migrated. Without the Vite Supabase variables, the app continues using its local SQLite database and local admin login.
-
-## Local data
-
-- Product information: `data/kora.sqlite`
-- Product photos: `data/uploads/`
-
-Keep a copy of the `data` folder if you want a backup. The local development server listens only on this computer.
+From the repository root, run `npm run check` and `npm run lint`. From the repository root, define schema changes in `db/schema.ts` and generate a named migration with `npx drizzle-kit generate --name describe_change`. Netlify applies migrations during deployment; do not apply them manually.

@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import './Admin.css'
 import { starterFragrances } from './data/fragrances'
 import { formatPrice } from './lib/currency'
 import { getProducts, removeProduct, removeUploadedImage, saveProduct, uploadProductImage } from './lib/products'
-import { getSupabaseClient, isSupabaseConfigured } from './lib/supabase'
+import { getUser, login, logout, handleAuthCallback, acceptInvite, updateUser, requestPasswordRecovery, onAuthChange } from '@netlify/identity'
 import type { Family, Fragrance, ProductDraft } from './types'
-
-const tokenKey = 'kora-local-admin-token'
 
 const blankProduct: ProductDraft = {
   id: '', name: '', family: 'Floral', notes: '', price: 0, size: '50 ml', tag: '',
@@ -30,13 +28,13 @@ async function apiJson<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 function Admin() {
-  const supabaseMode = isSupabaseConfigured
-  const [token, setToken] = useState('')
+  const authCallback = useRef<ReturnType<typeof handleAuthCallback> | null>(null)
   const [authReady, setAuthReady] = useState(false)
-  const [setupNeeded, setSetupNeeded] = useState(false)
+  const [inviteToken, setInviteToken] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const [authBusy, setAuthBusy] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [email, setEmail] = useState('')
-  const [username, setUsername] = useState('')
   const [products, setProducts] = useState<Fragrance[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [password, setPassword] = useState('')
@@ -52,86 +50,34 @@ function Admin() {
 
   const signOut = useCallback(async () => {
     try {
-      if (supabaseMode) {
-        const { error: signOutError } = await getSupabaseClient().auth.signOut()
-        if (signOutError) throw new Error(signOutError.message)
-      } else {
-        localStorage.removeItem(tokenKey)
-        setToken('')
-        setIsAdmin(false)
-        setProducts([])
-      }
+      await logout()
+      setIsAdmin(false)
+      setProducts([])
       setMessage('You are signed out.')
-    } catch (signOutError) {
-      setError(errorText(signOutError))
-    }
-  }, [supabaseMode])
+    } catch (error) { setError(errorText(error)) }
+  }, [])
 
   useEffect(() => {
     let alive = true
-    if (supabaseMode) {
-      const supabase = getSupabaseClient()
-      const verifySession = async (session: Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']) => {
-        if (!session) return
-        const { data, error: adminError } = await supabase
-          .from('admin_users')
-          .select('user_id')
-          .eq('user_id', session.user.id)
-          .maybeSingle()
+    const unsubscribe = onAuthChange((event) => {
+      if (event === 'logout' && alive) { setIsAdmin(false); setProducts([]) }
+    })
+    async function restore() {
+      try {
+        const callback = await (authCallback.current ??= handleAuthCallback())
         if (!alive) return
-        if (adminError) throw new Error(adminError.message)
-        if (!data) {
-          await supabase.auth.signOut()
-          throw new Error('This account is not authorized for the KORA studio.')
-        }
-        setEmail(session.user.email ?? '')
-        setToken(session.access_token)
-        setIsAdmin(true)
-      }
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'SIGNED_OUT' && alive) {
-          setToken('')
-          setIsAdmin(false)
-          setEmail('')
-          setProducts([])
-        }
-        if (event === 'TOKEN_REFRESHED' && session && alive) setToken(session.access_token)
-      })
-      supabase.auth.getSession()
-        .then(async ({ data, error: sessionError }) => {
-          if (sessionError) throw new Error(sessionError.message)
-          await verifySession(data.session)
-        })
-        .catch((sessionError: unknown) => { if (alive) setError(errorText(sessionError)) })
-        .finally(() => { if (alive) setAuthReady(true) })
-      return () => {
-        alive = false
-        subscription.unsubscribe()
-      }
+        if (callback?.type === 'invite' && callback.token) { setInviteToken(callback.token); return }
+        if (callback?.type === 'recovery') { setResetting(true); return }
+        const user = await getUser()
+        if (!user || !alive) return
+        await apiJson('/api/admin/session')
+        if (alive) { setEmail(user.email ?? ''); setIsAdmin(true) }
+      } catch (error) { if (alive) setError(errorText(error)) }
+      finally { if (alive) setAuthReady(true) }
     }
-    const savedToken = localStorage.getItem(tokenKey) || ''
-    apiJson<{ isConfigured: boolean }>('/api/admin/status')
-      .then(async ({ isConfigured }) => {
-        if (!alive) return
-        setSetupNeeded(!isConfigured)
-        if (savedToken) {
-          try {
-            await apiJson('/api/admin/session', { headers: { 'x-kora-admin-token': savedToken } })
-            if (alive) {
-              setToken(savedToken)
-              setIsAdmin(true)
-            }
-          } catch {
-            localStorage.removeItem(tokenKey)
-          }
-        }
-      })
-      .catch((statusError: unknown) => {
-        if (alive) setError(errorText(statusError))
-      })
-      .finally(() => { if (alive) setAuthReady(true) })
-    return () => { alive = false }
-  }, [supabaseMode])
+    void restore()
+    return () => { alive = false; unsubscribe() }
+  }, [])
 
   useEffect(() => {
     if (!photo) {
@@ -144,10 +90,10 @@ function Admin() {
   }, [photo])
 
   useEffect(() => {
-    if (!isAdmin || (!supabaseMode && !token)) return
+    if (!isAdmin) return
     let alive = true
     setLoadingProducts(true)
-    getProducts(false, token).then((items) => {
+    getProducts(false).then((items) => {
       if (alive) setProducts(items)
     }).catch((loadError: unknown) => {
       if (alive) {
@@ -161,7 +107,7 @@ function Admin() {
       if (alive) setLoadingProducts(false)
     })
     return () => { alive = false }
-  }, [isAdmin, signOut, supabaseMode, token])
+  }, [isAdmin, signOut])
 
   function resetForm() {
     setForm(blankProduct)
@@ -184,58 +130,41 @@ function Admin() {
   }
 
   async function refreshProducts() {
-    setProducts(await getProducts(false, token))
+    setProducts(await getProducts(false))
   }
 
   async function submitPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
     setMessage('')
-    if (supabaseMode) {
-      try {
-        const supabase = getSupabaseClient()
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-        if (signInError) throw new Error(signInError.message)
-        if (!data.session) throw new Error('Supabase did not return a signed-in session.')
-        const { data: admin, error: adminError } = await supabase
-          .from('admin_users')
-          .select('user_id')
-          .eq('user_id', data.session.user.id)
-          .maybeSingle()
-        if (adminError) throw new Error(adminError.message)
-        if (!admin) {
-          await supabase.auth.signOut()
-          throw new Error('This account is not authorized for the KORA studio.')
-        }
-        setToken(data.session.access_token)
-        setIsAdmin(true)
-        setEmail(data.session.user.email ?? email)
-        setPassword('')
-      } catch (authError) {
-        setError(errorText(authError))
-      }
-      return
-    }
-    if (setupNeeded && password !== confirmPassword) {
+    if ((inviteToken || resetting) && password !== confirmPassword) {
       setError('Those passwords do not match yet.')
       return
     }
+    setAuthBusy(true)
     try {
-      const endpoint = setupNeeded ? '/api/admin/setup' : '/api/admin/login'
-      const result = await apiJson<{ token: string }>(endpoint, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      localStorage.setItem(tokenKey, result.token)
-      setToken(result.token)
-      setIsAdmin(true)
-      setSetupNeeded(false)
+      if (inviteToken) await acceptInvite(inviteToken, password)
+      else if (resetting) await updateUser({ password })
+      else await login(email, password)
+      setInviteToken('')
+      setResetting(false)
       setPassword('')
       setConfirmPassword('')
-    } catch (authError) {
-      setError(errorText(authError))
-    }
+      await apiJson('/api/admin/session')
+      const user = await getUser()
+      setEmail(user?.email ?? email)
+      setIsAdmin(true)
+    } catch (error) { setError(errorText(error)) }
+    finally { setAuthBusy(false) }
+  }
+
+  async function recoverPassword() {
+    setError('')
+    if (!email) { setError('Enter your email address first.'); return }
+    try {
+      await requestPasswordRecovery(email)
+      setMessage('Check your email for a password reset link.')
+    } catch (error) { setError(errorText(error)) }
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -251,16 +180,16 @@ function Admin() {
     let uploaded: { imageUrl: string; imagePath: string } | null = null
     const previousImagePath = form.imagePath
     try {
-      if (photo) uploaded = await uploadProductImage(photo, productId, token)
+      if (photo) uploaded = await uploadProductImage(photo, productId)
       const imageUrl = uploaded?.imageUrl ?? (removePhoto ? null : form.imageUrl ?? null)
       const imagePath = uploaded?.imagePath ?? (removePhoto ? null : form.imagePath ?? null)
-      const saved = await saveProduct({ ...form, id: productId, imageUrl, imagePath }, token)
+      const saved = await saveProduct({ ...form, id: productId, imageUrl, imagePath })
       setProducts((current) => [...current.filter((item) => item.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name)))
       setMessage(`${saved.name} saved to the KORA collection.`)
       resetForm()
-      if (supabaseMode && previousImagePath && previousImagePath !== imagePath) {
+      if (previousImagePath && previousImagePath !== imagePath) {
         try {
-          await removeUploadedImage(previousImagePath, token)
+          await removeUploadedImage(previousImagePath)
         } catch (cleanupError) {
           setError(`${saved.name} was saved, but its previous photo could not be removed: ${errorText(cleanupError)}`)
         }
@@ -269,7 +198,7 @@ function Admin() {
       let cleanupMessage = ''
       if (uploaded) {
         try {
-          await removeUploadedImage(uploaded.imagePath, token)
+          await removeUploadedImage(uploaded.imagePath)
         } catch (cleanupError) {
           cleanupMessage = ` The newly uploaded photo could not be cleaned up: ${errorText(cleanupError)}`
         }
@@ -286,7 +215,7 @@ function Admin() {
     setError('')
     setMessage('')
     try {
-      await removeProduct(product.id, token)
+      await removeProduct(product.id)
       setProducts((current) => current.filter((item) => item.id !== product.id))
       if (form.id === product.id) resetForm()
       setMessage(`${product.name} deleted.`)
@@ -301,32 +230,24 @@ function Admin() {
     return <div className="admin-page"><div className="admin-loading">Opening the KORA studio…</div></div>
   }
 
-  if (error && !isAdmin && !setupNeeded && !supabaseMode) {
-    return (
-      <div className="admin-page">
-        <header className="admin-topbar"><a className="admin-brand" href="/">KORA <span>FRAGRANCE HOUSE</span></a><a className="admin-back" href="/">Back to shop ↗</a></header>
-        <main className="admin-login-card"><span className="admin-kicker">LOCAL KORA STUDIO</span><h1>Couldn’t open the studio.</h1><p>Start the KORA shop on this computer, then refresh this page.</p><p className="admin-error" role="alert">{error}</p></main>
-      </div>
-    )
-  }
-
   if (!isAdmin) {
     return (
       <div className="admin-page">
         <header className="admin-topbar"><a className="admin-brand" href="/">KORA <span>FRAGRANCE HOUSE</span></a><a className="admin-back" href="/">Back to shop ↗</a></header>
         <main className="admin-login-card">
           <span className="admin-kicker">THE KORA HOUSE · ADMIN</span>
-          <h1>{!supabaseMode && setupNeeded ? 'Set up your studio.' : 'Welcome back.'}</h1>
-          <p>{supabaseMode ? 'Sign in with your authorized KORA administrator account.' : setupNeeded ? 'Choose a password to protect the product studio on this computer.' : 'Enter your KORA studio password to manage products and photos.'}</p>
+          <h1>{inviteToken ? 'Set up your studio.' : resetting ? 'Choose a new password.' : 'Welcome back.'}</h1>
+          <p>Sign in with your authorized KORA administrator account.</p>
           <form className="admin-form" onSubmit={submitPassword}>
-            {supabaseMode && <label>Email<input autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>}
-            {!supabaseMode && <label>Admin username<input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required /></label>}
-            <label>{!supabaseMode && setupNeeded ? 'Create a password' : 'Studio password'}<input autoComplete={!supabaseMode && setupNeeded ? 'new-password' : 'current-password'} type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
-            {!supabaseMode && setupNeeded && <label>Type the password again<input autoComplete="new-password" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>}
+            {!inviteToken && !resetting && <label>Email<input autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>}
+            <label>{inviteToken || resetting ? 'New password' : 'Studio password'}<input autoComplete={inviteToken || resetting ? 'new-password' : 'current-password'} type="password" minLength={inviteToken || resetting ? 8 : undefined} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+            {(inviteToken || resetting) && <label>Confirm password<input autoComplete="new-password" type="password" minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label>}
             {error && <p className="admin-error" role="alert">{error}</p>}
-            <button className="admin-submit" type="submit">{!supabaseMode && setupNeeded ? 'Create local password' : 'Sign in'} <span>↗</span></button>
+            {message && <p role="status">{message}</p>}
+            <button className="admin-submit" type="submit" disabled={authBusy}>{authBusy ? 'Signing in…' : inviteToken || resetting ? 'Save password' : 'Sign in'} <span>↗</span></button>
+            {!inviteToken && !resetting && <button className="admin-back admin-text-button" type="button" onClick={() => { void recoverPassword() }}>Forgot password?</button>}
           </form>
-          <p className="admin-login-help">{supabaseMode ? 'Admin accounts must be created in Supabase and explicitly authorized for the KORA studio.' : 'Products and photos are saved only on this computer.'}</p>
+          <p className="admin-login-help">Administrator accounts need an invitation and the admin role in Netlify Identity.</p>
         </main>
       </div>
     )
@@ -334,7 +255,7 @@ function Admin() {
 
   return (
     <div className="admin-page">
-      <header className="admin-topbar"><a className="admin-brand" href="/">KORA <span>FRAGRANCE HOUSE</span></a><div className="admin-top-actions"><span className="admin-signed-in">{supabaseMode ? `Signed in${email ? ` as ${email}` : ''}` : 'Saved on this computer'}</span><a className="admin-back" href="/">View shop ↗</a><button className="admin-back admin-text-button" onClick={() => { void signOut() }}>Sign out</button></div></header>
+      <header className="admin-topbar"><a className="admin-brand" href="/">KORA <span>FRAGRANCE HOUSE</span></a><div className="admin-top-actions"><span className="admin-signed-in">{`Signed in${email ? ` as ${email}` : ''}`}</span><a className="admin-back" href="/">View shop ↗</a><button className="admin-back admin-text-button" onClick={() => { void signOut() }}>Sign out</button></div></header>
       <main className="admin-main">
         <div className="admin-heading"><div><span className="admin-kicker">THE KORA HOUSE · STUDIO</span><h1>Product collection</h1><p>Manage the fragrances and photography shown in your shop.</p></div><span className="admin-total">{products.length} {products.length === 1 ? 'SCENT' : 'SCENTS'}</span></div>
         {message && <div className="admin-success" role="status">{message}</div>}
@@ -376,7 +297,7 @@ function Admin() {
             {products.length === 0 && <button className="admin-seed-button" type="button" onClick={() => { const first = starterFragrances[0]; if (first) editProduct(first) }}>Use a starter fragrance as a draft</button>}
           </section>
         </div>
-        <p className="admin-footer-note">Your product list and photos are saved in the KORA folder on this computer.</p>
+        <p className="admin-footer-note">Your collection and photos are saved securely online.</p>
       </main>
     </div>
   )
